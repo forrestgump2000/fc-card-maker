@@ -14,9 +14,9 @@ const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans
 // Default positions as fractions of the card's width (x) and height (y).
 // Each frame in frames.json can override any of these under "layout".
 const DEFAULT_LAYOUT = {
-  photo: { x: 0.30, y: 0.10, w: 0.62, h: 0.50 }, // box the player photo fills
-  col: 0.22,         // x of the left column (rating, position, flag, badge)
-  top: 0.13,         // y where the left column starts
+  photo: { x: 0.30, y: 0.12, w: 0.62, h: 0.50 }, // box the player photo fills
+  col: 0.25,         // x of the left column (rating, position, flag, badge)
+  top: 0.15,         // y where the left column starts
   name: 0.665,       // y of the name baseline
   statLabel: 0.735,  // y of stat labels
   statValue: 0.795,  // y of stat values
@@ -46,25 +46,21 @@ function drawPhoto(ctx, img, box, data, color, placeholder) {
   o.scale(2, 2);
   if (img) {
     const zoom = data.photoZoom || 1;
-    const s = Math.max(box.w / img.width, box.h / img.height) * zoom;
+    // cut-out players fit fully inside the box (head at the top); normal photos fill it
+    // cut-outs: fill the box width so head and shoulders sit big at the top; anything below fades out
+    const fit = img.cutout ? Math.max(Math.min(box.w / img.width, box.h / img.height), (box.w * 0.85) / img.width) : Math.max(box.w / img.width, box.h / img.height);
+    const s = fit * zoom;
     const w = img.width * s, h = img.height * s;
+    const baseY = img.cutout ? box.h * 0.02 : (box.h - h) / 2;
     o.drawImage(img,
       (box.w - w) / 2 + (data.photoX || 0) * box.w * 0.5,
-      (box.h - h) / 2 + (data.photoY || 0) * box.h * 0.5, w, h);
-  } else if (placeholder) {
-    o.fillStyle = hexA(color, 0.18);
-    o.beginPath(); o.arc(box.w * 0.5, box.h * 0.37, box.w * 0.19, 0, 7); o.fill();
-    o.beginPath(); o.ellipse(box.w * 0.5, box.h * 0.98, box.w * 0.42, box.h * 0.36, 0, Math.PI, 0); o.fill();
+      baseY + (data.photoY || 0) * box.h * 0.5, w, h);
   } else return;
-  // soften the bottom and left edges so the photo blends into the card
+  // soften the bottom edge so the photo blends into the card above the name
   o.globalCompositeOperation = 'destination-in';
   const gv = o.createLinearGradient(0, 0, 0, box.h);
-  gv.addColorStop(0, '#000'); gv.addColorStop(0.75, '#000'); gv.addColorStop(1, 'rgba(0,0,0,0)');
+  gv.addColorStop(0, '#000'); gv.addColorStop(0.82, '#000'); gv.addColorStop(1, 'rgba(0,0,0,0)');
   o.fillStyle = gv; o.fillRect(0, 0, box.w, box.h);
-  const gh = o.createLinearGradient(0, 0, box.w, 0);
-  gh.addColorStop(0, 'rgba(0,0,0,0)'); gh.addColorStop(0.12, '#000');
-  gh.addColorStop(0.92, '#000'); gh.addColorStop(1, 'rgba(0,0,0,0)');
-  o.fillStyle = gh; o.fillRect(0, 0, box.w, box.h);
   ctx.drawImage(off, box.x, box.y, box.w, box.h);
 }
 
@@ -112,7 +108,22 @@ function renderCard(canvas, frame, data, images = {}, scale = 1, opts = {}) {
   ctx.drawImage(img, 0, 0, W, H);
 
   const box = { x: L.photo.x * W, y: L.photo.y * H, w: L.photo.w * W, h: L.photo.h * H };
-  drawPhoto(ctx, images.photo, box, data, color, opts.placeholder);
+  if (images.photo) {
+    // draw the photo on its own layer, then keep it only where the card itself is
+    // (so it never spills past the card's outline), and inset slightly from the border
+    const layer = document.createElement('canvas');
+    layer.width = canvas.width; layer.height = canvas.height;
+    const lc = layer.getContext('2d');
+    lc.setTransform(scale, 0, 0, scale, 0, 0);
+    drawPhoto(lc, images.photo, box, data, color);
+    lc.globalCompositeOperation = 'destination-in';
+    const inset = W * 0.035;
+    lc.drawImage(img, inset, inset * (H / W), W - inset * 2, H - inset * 2 * (H / W));
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(layer, 0, 0);
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.fillStyle = color;

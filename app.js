@@ -71,15 +71,125 @@
     saveTimer = setTimeout(() => DB.put(toRecord(f)).catch(() => {}), 300);
   };
 
-  // Shrink big camera-roll images and guess a readable text color.
+  // ---------- automatic background removal for player photos ----------
+  const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+  const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
+  let segmenterPromise = null;
+  function getSegmenter() {
+    if (!segmenterPromise) {
+      segmenterPromise = (async () => {
+        const vision = await import(`${MP}/vision_bundle.mjs`);
+        const files = await vision.FilesetResolver.forVisionTasks(`${MP}/wasm`);
+        return vision.ImageSegmenter.createFromOptions(files, {
+          baseOptions: { modelAssetPath: SEG_MODEL, delegate: 'CPU' },
+          runningMode: 'IMAGE', outputCategoryMask: false, outputConfidenceMasks: true,
+        });
+      })();
+      segmenterPromise.catch(() => { segmenterPromise = null; });
+    }
+    return segmenterPromise;
+  }
+
+  // Returns a new image of just the person, cropped tight, with a transparent background.
+  async function removeBackground(img) {
+    const seg = await getSegmenter();
+    const max = 1024, s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(img, 0, 0, c.width, c.height);
+
+    let bg = null, mw = 0, mh = 0;
+    seg.segment(c, (result) => {
+      const m = result.confidenceMasks[0]; // category 0 = background
+      mw = m.width; mh = m.height; bg = m.getAsFloat32Array().slice();
+    });
+    if (!bg) throw new Error('no mask');
+
+    // scale the mask to the photo size
+    const mc = document.createElement('canvas'); mc.width = mw; mc.height = mh;
+    const mx = mc.getContext('2d');
+    const md = mx.createImageData(mw, mh);
+    for (let i = 0; i < bg.length; i++) {
+      const a = Math.max(0, Math.min(1, (1 - bg[i] - 0.15) / 0.7));
+      md.data[i * 4 + 3] = Math.round(a * 255);
+    }
+    mx.putImageData(md, 0, 0);
+    x.globalCompositeOperation = 'destination-in';
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(mc, 0, 0, c.width, c.height);
+
+    // crop to the person
+    const px = x.getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < c.height; y += 2) for (let xx = 0; xx < c.width; xx += 2) {
+      if (px[(y * c.width + xx) * 4 + 3] > 60) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    if (x1 < 0) throw new Error('no person found');
+    const pad = Math.round(Math.max(c.width, c.height) * 0.02);
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+    x1 = Math.min(c.width - 1, x1 + pad); y1 = Math.min(c.height - 1, y1 + pad);
+    const out = document.createElement('canvas');
+    out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+    out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    const blob = await new Promise(r => out.toBlob(r, 'image/png'));
+    const result = await loadImg(URL.createObjectURL(blob));
+    result.cutout = true;
+    return result;
+  }
+
+  // Cut a card out of a screenshot: clear the plain background touching the edges, then trim.
+  function cutOutCard(c) {
+    const x = c.getContext('2d', { willReadFrequently: true });
+    const W = c.width, H = c.height;
+    const id = x.getImageData(0, 0, W, H), d = id.data;
+    const at = (i) => [d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]];
+    const corners = [0, W - 1, (H - 1) * W, H * W - 1].map(at);
+    const opaqueCorners = corners.filter(p => p[3] > 200);
+    if (opaqueCorners.length >= 3) {
+      const seen = new Uint8Array(W * H);
+      const stack = [];
+      for (let xx = 0; xx < W; xx++) { stack.push(xx, (H - 1) * W + xx); }
+      for (let y = 0; y < H; y++) { stack.push(y * W, y * W + W - 1); }
+      const tol = 42;
+      const near = (i) => {
+        const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+        return opaqueCorners.some(p => Math.abs(r - p[0]) + Math.abs(g - p[1]) + Math.abs(b - p[2]) < tol * 3 && Math.max(Math.abs(r - p[0]), Math.abs(g - p[1]), Math.abs(b - p[2])) < tol);
+      };
+      while (stack.length) {
+        const i = stack.pop();
+        if (seen[i]) continue; seen[i] = 1;
+        if (d[i * 4 + 3] < 20 || near(i)) {
+          d[i * 4 + 3] = 0;
+          const xx = i % W, y = (i / W) | 0;
+          if (xx > 0) stack.push(i - 1); if (xx < W - 1) stack.push(i + 1);
+          if (y > 0) stack.push(i - W); if (y < H - 1) stack.push(i + W);
+        }
+      }
+      x.putImageData(id, 0, 0);
+    }
+    // trim transparent edges
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+      if (d[(y * W + xx) * 4 + 3] > 20) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    if (x1 < 0 || (x1 - x0) < W * 0.2 || (y1 - y0) < H * 0.2) return c; // didn't find a card, keep as is
+    const out = document.createElement('canvas');
+    out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+    out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
+  }
+
+  // Shrink big camera-roll images, cut the card out, and guess a readable text color.
   async function importCard(file, index) {
     const src = await loadImg(URL.createObjectURL(file));
     const max = 1400, s = Math.min(1, max / Math.max(src.naturalWidth, src.naturalHeight));
-    const c = document.createElement('canvas');
+    let c = document.createElement('canvas');
     c.width = Math.round(src.naturalWidth * s); c.height = Math.round(src.naturalHeight * s);
-    const x = c.getContext('2d');
-    x.drawImage(src, 0, 0, c.width, c.height);
+    c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
     URL.revokeObjectURL(src.src);
+    c = cutOutCard(c);
+    const x = c.getContext('2d', { willReadFrequently: true });
     let lum = 0, n = 0;
     try {
       const px = x.getImageData(Math.round(c.width * 0.15), Math.round(c.height * 0.6), Math.round(c.width * 0.7), Math.round(c.height * 0.25)).data;
@@ -318,10 +428,39 @@
       };
       $(removeId).onclick = () => { images[key] = null; $(removeId).hidden = true; onSet && onSet(false); draw(); };
     };
-    imagePicker('photo-input', 'photo-remove', 'photo', (on) => {
-      $('photo-adjust').hidden = !on;
-      if (on) { state.photoZoom = 1; state.photoX = 0; state.photoY = 0; syncControls(); }
-    });
+    // player photo: background removed automatically
+    const photos = { original: null, cutout: null };
+    const usePhoto = () => {
+      images.photo = $('photo-cutout').checked && photos.cutout ? photos.cutout : photos.original;
+      draw();
+    };
+    $('photo-input').onchange = async (e) => {
+      const file = e.target.files[0]; e.target.value = '';
+      if (!file) return;
+      try {
+        photos.original = await loadImg(await readFile(file));
+      } catch (err) { alert('Sorry, that photo could not be opened.'); return; }
+      photos.cutout = null;
+      state.photoZoom = 1; state.photoX = 0; state.photoY = 0; syncControls();
+      $('photo-remove').hidden = false; $('photo-adjust').hidden = false; $('photo-cutout-row').hidden = false;
+      usePhoto();
+      const status = $('photo-status');
+      status.textContent = 'Removing background…'; status.hidden = false;
+      try {
+        const original = photos.original;
+        const cut = await removeBackground(original);
+        if (photos.original === original) { photos.cutout = cut; status.hidden = true; usePhoto(); }
+      } catch (err) {
+        console.error(err);
+        status.textContent = 'Could not remove the background on this device.';
+      }
+    };
+    $('photo-cutout').onchange = usePhoto;
+    $('photo-remove').onclick = () => {
+      photos.original = photos.cutout = null; images.photo = null;
+      $('photo-remove').hidden = true; $('photo-adjust').hidden = true; $('photo-cutout-row').hidden = true; $('photo-status').hidden = true;
+      draw();
+    };
     imagePicker('badge-input', 'badge-remove', 'badge');
 
     const save = async () => {

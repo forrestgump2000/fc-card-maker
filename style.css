@@ -105,3 +105,4 @@ input[type=color] { width: 100%; height: 34px; border: 1px solid var(--line); bo
 [hidden] { display: none !important; }
 .design-grid .design-tile { display: block; width: 100%; }
 .design-grid .add-tile { display: flex; }
+.cutout-row { margin-top: 12px; }
