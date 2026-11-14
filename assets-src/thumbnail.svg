@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b1458"/><stop offset="1" stop-color="#0b0816"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff1b8"/><stop offset="0.45" stop-color="#f2c94c"/><stop offset="1" stop-color="#b9861c"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#8d949b"/>
+    </linearGradient>
+    <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a2a12"/><stop offset="1" stop-color="#0a0806"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <text x="80" y="250" font-family="Avenir Next Condensed" font-weight="800" font-size="120" fill="#ffffff">FC CARD</text>
+  <text x="80" y="370" font-family="Avenir Next Condensed" font-weight="800" font-size="120" fill="#f2c94c">MAKER</text>
+  <text x="84" y="440" font-family="Avenir Next" font-weight="500" font-size="34" fill="#c8c0e6">Your photo. Your rating. Your card.</text>
+  <g transform="rotate(-12 760 330)"><rect x="680" y="120" width="230" height="340" rx="30" fill="url(#silver)"/></g>
+  <g transform="rotate(10 1040 330)"><rect x="940" y="120" width="230" height="340" rx="30" fill="url(#dark)" stroke="#d9b25a" stroke-width="6"/></g>
+  <g>
+    <rect x="770" y="110" width="270" height="400" rx="34" fill="url(#gold)"/>
+    <rect x="788" y="128" width="234" height="364" rx="24" fill="none" stroke="#fff6d6" stroke-width="4" opacity="0.8"/>
+    <text x="905" y="270" text-anchor="middle" font-family="Avenir Next Condensed" font-weight="800" font-size="130" fill="#2a1d02">99</text>
+    <text x="905" y="420" text-anchor="middle" font-family="Avenir Next Condensed" font-weight="800" font-size="90" fill="#2a1d02">FC</text>
+  </g>
+</svg>

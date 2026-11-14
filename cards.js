@@ -1,0 +1,177 @@
+// Card renderer for FC Card Maker.
+// Card backgrounds are licensed frame images listed in /frames/frames.json.
+// Everything on top (photo, rating, name, stats...) is laid out here.
+
+const CARD_W = 600; // render width; height follows the frame's aspect ratio
+
+const STAT_KEYS = ['pac', 'sho', 'pas', 'dri', 'def', 'phy'];
+const STAT_LABELS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
+const GK_LABELS = ['DIV', 'HAN', 'KIC', 'REF', 'SPD', 'POS'];
+
+const FONT = '"Oswald", "Arial Narrow", sans-serif';
+const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+
+// Default positions as fractions of the card's width (x) and height (y).
+// Each frame in frames.json can override any of these under "layout".
+const DEFAULT_LAYOUT = {
+  photo: { x: 0.30, y: 0.10, w: 0.62, h: 0.50 }, // box the player photo fills
+  col: 0.22,         // x of the left column (rating, position, flag, badge)
+  top: 0.13,         // y where the left column starts
+  name: 0.665,       // y of the name baseline
+  statLabel: 0.735,  // y of stat labels
+  statValue: 0.795,  // y of stat values
+  statLeft: 0.10, statRight: 0.90,
+  team: 0.87,        // y of the team name
+  scale: 1,          // multiply all text sizes
+};
+
+function hexA(hex, a) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function fitFont(ctx, text, weight, size, maxW) {
+  let s = size;
+  ctx.font = `${weight} ${s}px ${FONT}`;
+  while (ctx.measureText(text).width > maxW && s > 12) {
+    s -= 1; ctx.font = `${weight} ${s}px ${FONT}`;
+  }
+  return s;
+}
+
+function drawPhoto(ctx, img, box, data, color, placeholder) {
+  const off = document.createElement('canvas');
+  off.width = Math.round(box.w * 2); off.height = Math.round(box.h * 2);
+  const o = off.getContext('2d');
+  o.scale(2, 2);
+  if (img) {
+    const zoom = data.photoZoom || 1;
+    const s = Math.max(box.w / img.width, box.h / img.height) * zoom;
+    const w = img.width * s, h = img.height * s;
+    o.drawImage(img,
+      (box.w - w) / 2 + (data.photoX || 0) * box.w * 0.5,
+      (box.h - h) / 2 + (data.photoY || 0) * box.h * 0.5, w, h);
+  } else if (placeholder) {
+    o.fillStyle = hexA(color, 0.18);
+    o.beginPath(); o.arc(box.w * 0.5, box.h * 0.37, box.w * 0.19, 0, 7); o.fill();
+    o.beginPath(); o.ellipse(box.w * 0.5, box.h * 0.98, box.w * 0.42, box.h * 0.36, 0, Math.PI, 0); o.fill();
+  } else return;
+  // soften the bottom and left edges so the photo blends into the card
+  o.globalCompositeOperation = 'destination-in';
+  const gv = o.createLinearGradient(0, 0, 0, box.h);
+  gv.addColorStop(0, '#000'); gv.addColorStop(0.75, '#000'); gv.addColorStop(1, 'rgba(0,0,0,0)');
+  o.fillStyle = gv; o.fillRect(0, 0, box.w, box.h);
+  const gh = o.createLinearGradient(0, 0, box.w, 0);
+  gh.addColorStop(0, 'rgba(0,0,0,0)'); gh.addColorStop(0.12, '#000');
+  gh.addColorStop(0.92, '#000'); gh.addColorStop(1, 'rgba(0,0,0,0)');
+  o.fillStyle = gh; o.fillRect(0, 0, box.w, box.h);
+  ctx.drawImage(off, box.x, box.y, box.w, box.h);
+}
+
+function drawCrest(ctx, team, badge, cx, cy, size, color) {
+  if (badge) {
+    const s = Math.min(size / badge.width, size / badge.height);
+    ctx.drawImage(badge, cx - (badge.width * s) / 2, cy - (badge.height * s) / 2, badge.width * s, badge.height * s);
+    return;
+  }
+  const initials = team.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
+  const r = size / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.8, cy - r); ctx.lineTo(cx + r * 0.8, cy - r); ctx.lineTo(cx + r * 0.8, cy + r * 0.15);
+  ctx.quadraticCurveTo(cx + r * 0.8, cy + r * 0.75, cx, cy + r * 1.05);
+  ctx.quadraticCurveTo(cx - r * 0.8, cy + r * 0.75, cx - r * 0.8, cy + r * 0.15);
+  ctx.closePath();
+  ctx.strokeStyle = color; ctx.lineWidth = size * 0.05; ctx.stroke();
+  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  fitFont(ctx, initials, 700, size * 0.32, size * 0.62);
+  ctx.fillText(initials, cx, cy + size * 0.02);
+  ctx.restore();
+}
+
+/**
+ * frame: { img, text, layout } — img is a loaded HTMLImageElement
+ * data:  { name, rating, showRating, position, flag, team, stats, show, photoZoom, photoX, photoY }
+ * images: { photo, badge }
+ */
+function renderCard(canvas, frame, data, images = {}, scale = 1, opts = {}) {
+  const img = frame.img;
+  const W = CARD_W, H = Math.round(CARD_W * (img.naturalHeight / img.naturalWidth));
+  canvas.width = W * scale; canvas.height = H * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const L = { ...DEFAULT_LAYOUT, ...(frame.layout || {}) };
+  L.photo = { ...DEFAULT_LAYOUT.photo, ...((frame.layout || {}).photo || {}) };
+  const sy = L.shiftY || 0;
+  L.top += sy; L.name += sy; L.statLabel += sy; L.statValue += sy; L.team += sy;
+  const color = frame.text || '#ffffff';
+  const k = (W / 600) * L.scale;
+
+  ctx.drawImage(img, 0, 0, W, H);
+
+  const box = { x: L.photo.x * W, y: L.photo.y * H, w: L.photo.w * W, h: L.photo.h * H };
+  drawPhoto(ctx, images.photo, box, data, color, opts.placeholder);
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  if (frame.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 6 * k; ctx.shadowOffsetY = 2 * k; }
+
+  const colX = L.col * W;
+  let y = L.top * H;
+  if (data.showRating) {
+    ctx.font = `700 ${96 * k}px ${FONT}`;
+    ctx.fillText(String(data.rating), colX, y + 88 * k);
+    y += 98 * k;
+  }
+  if (data.position) {
+    ctx.font = `500 ${38 * k}px ${FONT}`;
+    ctx.fillText(data.position, colX, y + 38 * k);
+    y += 52 * k;
+  }
+  if (data.flag) {
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.font = `${46 * k}px ${EMOJI_FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(data.flag, colX, y + 30 * k);
+    ctx.restore();
+    y += 64 * k;
+  }
+  if (data.team || images.badge) {
+    drawCrest(ctx, data.team || '', images.badge, colX, y + 32 * k, 60 * k, color);
+  }
+
+  const name = (data.name || '').trim().toUpperCase();
+  if (name) {
+    fitFont(ctx, name, 700, 52 * k, W * 0.78);
+    ctx.fillText(name, W / 2, L.name * H);
+  }
+
+  const labels = data.position === 'GK' ? GK_LABELS : STAT_LABELS;
+  const vis = STAT_KEYS.map((key, i) => ({ key, label: labels[i] })).filter(s => data.show[s.key]);
+  if (vis.length) {
+    const left = L.statLeft * W, width = (L.statRight - L.statLeft) * W;
+    vis.forEach((s, i) => {
+      const x = left + (i + 0.5) * (width / vis.length);
+      ctx.font = `400 ${22 * k}px ${FONT}`;
+      ctx.fillText(s.label, x, L.statLabel * H);
+      ctx.font = `700 ${44 * k}px ${FONT}`;
+      ctx.fillText(String(data.stats[s.key]), x, L.statValue * H);
+    });
+  }
+
+  if (data.team) {
+    const t = data.team.toUpperCase();
+    ctx.globalAlpha = 0.85;
+    fitFont(ctx, t, 500, 20 * k, W * 0.55);
+    ctx.fillText(t, W / 2, L.team * H);
+  }
+  ctx.restore();
+  return canvas;
+}
+
+window.FCCards = { STAT_KEYS, STAT_LABELS, GK_LABELS, renderCard, CARD_W, DEFAULT_LAYOUT };

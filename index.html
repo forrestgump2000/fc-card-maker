@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FC Card Maker</title>
+  <meta name="description" content="Make your own football player card: pick a design, add your photo, rating, stats, position, country and team." />
+  <meta name="theme-color" content="#0d0a1a" />
+  <meta property="og:title" content="FC Card Maker" />
+  <meta property="og:description" content="Make your own football player card with your photo, rating and stats." />
+  <meta property="og:image" content="/thumbnail.jpg" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="/thumbnail.jpg" />
+  <link rel="icon" type="image/png" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FC Cards" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- MENU -->
+  <section id="menu" class="screen active">
+    <header class="hero">
+      <img src="/icon-192.png" alt="" class="logo" />
+      <div>
+        <h1>FC Card Maker</h1>
+        <p>Add a card design, then make it yours</p>
+      </div>
+    </header>
+    <div id="design-groups"></div>
+    <input id="card-import" type="file" accept="image/*" multiple hidden />
+  </section>
+
+  <!-- EDITOR -->
+  <section id="editor" class="screen">
+    <div class="topbar">
+      <button id="back" class="ghost">‹ Cards</button>
+      <span id="design-name"></span>
+      <button id="save-top" class="primary small">Save</button>
+    </div>
+
+    <div class="editor-layout">
+      <div class="preview-wrap">
+        <canvas id="preview" aria-label="Card preview"></canvas>
+      </div>
+
+      <form id="controls" onsubmit="return false">
+        <fieldset id="layout-box">
+          <legend>Card layout</legend>
+          <label class="field">
+            <span>Card name</span>
+            <input id="card-name" type="text" maxlength="24" autocomplete="off" />
+          </label>
+          <label class="slider-row"><span>Text color</span><input id="lay-color" type="color" value="#ffffff" /></label>
+          <label class="slider-row"><span>Text size</span><input id="lay-scale" type="range" min="0.6" max="1.5" step="0.01" /></label>
+          <label class="slider-row"><span>Text up / down</span><input id="lay-shift" type="range" min="-0.15" max="0.15" step="0.005" /></label>
+          <label class="slider-row"><span>Rating left / right</span><input id="lay-col" type="range" min="0.1" max="0.45" step="0.005" /></label>
+          <label class="slider-row"><span>Photo area up / down</span><input id="lay-photo-y" type="range" min="0" max="0.4" step="0.005" /></label>
+          <label class="slider-row"><span>Photo area size</span><input id="lay-photo-size" type="range" min="0.3" max="0.9" step="0.005" /></label>
+          <button id="lay-reset" type="button" class="ghost wide">Reset layout</button>
+          <button id="card-delete" type="button" class="ghost wide danger">Delete this card</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Player</legend>
+          <label class="field">
+            <span>Name</span>
+            <input id="name" type="text" maxlength="24" placeholder="Leave blank for no name" autocomplete="off" />
+          </label>
+
+          <div class="photo-row">
+            <label class="btn" for="photo-input">📷 Choose photo</label>
+            <input id="photo-input" type="file" accept="image/*" hidden />
+            <button id="photo-remove" type="button" class="ghost" hidden>Remove</button>
+          </div>
+          <div id="photo-adjust" hidden>
+            <label class="slider-row"><span>Zoom</span><input id="photo-zoom" type="range" min="1" max="3" step="0.01" value="1" /></label>
+            <label class="slider-row"><span>Left / Right</span><input id="photo-x" type="range" min="-1" max="1" step="0.01" value="0" /></label>
+            <label class="slider-row"><span>Up / Down</span><input id="photo-y" type="range" min="-1" max="1" step="0.01" value="0" /></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>
+            <label class="toggle"><input id="show-rating" type="checkbox" checked /> Rating</label>
+          </legend>
+          <div class="stat-row single">
+            <input id="rating" type="range" min="45" max="99" value="88" />
+            <input id="rating-num" type="number" min="45" max="99" value="88" inputmode="numeric" />
+          </div>
+        </fieldset>
+
+        <fieldset class="grid2">
+          <label class="field">
+            <span>Position</span>
+            <select id="position"></select>
+          </label>
+          <label class="field">
+            <span>Country</span>
+            <select id="country"></select>
+          </label>
+          <label class="field full">
+            <span>Team</span>
+            <input id="team" type="text" list="teams" maxlength="30" placeholder="Leave blank for no team" autocomplete="off" />
+            <datalist id="teams"></datalist>
+          </label>
+          <div class="photo-row full">
+            <label class="btn" for="badge-input">🛡️ Team badge (optional)</label>
+            <input id="badge-input" type="file" accept="image/*" hidden />
+            <button id="badge-remove" type="button" class="ghost" hidden>Remove</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Stats <small>(45–99, untick to hide)</small></legend>
+          <div id="stats"></div>
+          <button id="randomize" type="button" class="ghost wide">🎲 Random stats</button>
+        </fieldset>
+
+        <button id="save" type="button" class="primary wide big">Save card</button>
+      </form>
+    </div>
+  </section>
+
+  <script src="/cards.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
