@@ -80,52 +80,64 @@
   };
 
   // ---------- automatic background removal for player photos ----------
-  const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
-  const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
-  let segmenterPromise = null;
-  function getSegmenter() {
-    if (!segmenterPromise) {
-      segmenterPromise = (async () => {
-        const vision = await import(`${MP}/vision_bundle.mjs`);
-        const files = await vision.FilesetResolver.forVisionTasks(`${MP}/wasm`);
-        return vision.ImageSegmenter.createFromOptions(files, {
-          baseOptions: { modelAssetPath: SEG_MODEL, delegate: 'CPU' },
-          runningMode: 'IMAGE', outputCategoryMask: false, outputConfidenceMasks: true,
-        });
+  // 1st choice: remove.bg through our own /api/remove-bg (key stays on the server).
+  // Backup: MODNet portrait matting running in the browser (no account needed).
+  const TJS = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/dist/transformers.min.js';
+  let modnetPromise = null;
+  function getModnet() {
+    if (!modnetPromise) {
+      modnetPromise = (async () => {
+        const t = await import(TJS);
+        const [model, processor] = await Promise.all([
+          t.AutoModel.from_pretrained('Xenova/modnet', { dtype: 'fp32' }),
+          t.AutoProcessor.from_pretrained('Xenova/modnet'),
+        ]);
+        return { t, model, processor };
       })();
-      segmenterPromise.catch(() => { segmenterPromise = null; });
+      modnetPromise.catch(() => { modnetPromise = null; });
     }
-    return segmenterPromise;
+    return modnetPromise;
+  }
+
+  function photoCanvas(img, max) {
+    const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+    c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  async function viaRemoveBg(img) {
+    const c = photoCanvas(img, 1600);
+    const jpg = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+    const r = await fetch('/api/remove-bg', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: jpg });
+    if (!r.ok) throw new Error('remove.bg unavailable (' + r.status + ')');
+    const cut = await loadImg(URL.createObjectURL(await r.blob()));
+    const out = document.createElement('canvas');
+    out.width = cut.naturalWidth; out.height = cut.naturalHeight;
+    out.getContext('2d', { willReadFrequently: true }).drawImage(cut, 0, 0);
+    return out;
+  }
+
+  async function viaModnet(img) {
+    const { t, model, processor } = await getModnet();
+    const c = photoCanvas(img, 1024);
+    const raw = t.RawImage.fromCanvas(c);
+    const { pixel_values } = await processor(raw);
+    const { output } = await model({ input: pixel_values });
+    const mask = await t.RawImage.fromTensor(output[0].mul(255).to('uint8')).resize(c.width, c.height);
+    const x = c.getContext('2d', { willReadFrequently: true });
+    const px = x.getImageData(0, 0, c.width, c.height);
+    for (let i = 0; i < mask.data.length; i++) px.data[i * 4 + 3] = mask.data[i];
+    x.putImageData(px, 0, 0);
+    return c;
   }
 
   // Returns a new image of just the person, cropped tight, with a transparent background.
   async function removeBackground(img) {
-    const seg = await getSegmenter();
-    const max = 1024, s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+    let c;
+    try { c = await viaRemoveBg(img); } catch (e) { c = await viaModnet(img); }
     const x = c.getContext('2d', { willReadFrequently: true });
-    x.drawImage(img, 0, 0, c.width, c.height);
-
-    let bg = null, mw = 0, mh = 0;
-    seg.segment(c, (result) => {
-      const m = result.confidenceMasks[0]; // category 0 = background
-      mw = m.width; mh = m.height; bg = m.getAsFloat32Array().slice();
-    });
-    if (!bg) throw new Error('no mask');
-
-    // scale the mask to the photo size
-    const mc = document.createElement('canvas'); mc.width = mw; mc.height = mh;
-    const mx = mc.getContext('2d');
-    const md = mx.createImageData(mw, mh);
-    for (let i = 0; i < bg.length; i++) {
-      const a = Math.max(0, Math.min(1, (1 - bg[i] - 0.15) / 0.7));
-      md.data[i * 4 + 3] = Math.round(a * 255);
-    }
-    mx.putImageData(md, 0, 0);
-    x.globalCompositeOperation = 'destination-in';
-    x.imageSmoothingQuality = 'high';
-    x.drawImage(mc, 0, 0, c.width, c.height);
 
     // crop to the person
     const px = x.getImageData(0, 0, c.width, c.height).data;
