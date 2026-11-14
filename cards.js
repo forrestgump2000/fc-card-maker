@@ -92,7 +92,7 @@ function drawCrest(ctx, team, badge, cx, cy, size, color) {
  */
 function renderCard(canvas, frame, data, images = {}, scale = 1, opts = {}) {
   const img = frame.img;
-  const W = CARD_W, H = Math.round(CARD_W * (img.naturalHeight / img.naturalWidth));
+  const W = CARD_W, H = Math.round(CARD_W * ((img.naturalHeight || img.height) / (img.naturalWidth || img.width)));
   canvas.width = W * scale; canvas.height = H * scale;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -185,4 +185,99 @@ function renderCard(canvas, frame, data, images = {}, scale = 1, opts = {}) {
   return canvas;
 }
 
-window.FCCards = { STAT_KEYS, STAT_LABELS, GK_LABELS, renderCard, CARD_W, DEFAULT_LAYOUT };
+// ---------- built-in shield cards ----------
+// Shield silhouette: crest notch on top, curled corners, straight sides, pointed base.
+function shieldPath(c, k = 1) {
+  c.save();
+  c.translate(300, 430); c.scale(k, k); c.translate(-300, -430);
+  c.beginPath();
+  c.moveTo(78, 62);
+  c.lineTo(250, 62);
+  c.quadraticCurveTo(266, 62, 276, 50);
+  c.lineTo(300, 26);
+  c.lineTo(324, 50);
+  c.quadraticCurveTo(334, 62, 350, 62);
+  c.lineTo(522, 62);
+  c.bezierCurveTo(548, 62, 562, 48, 570, 30);
+  c.bezierCurveTo(590, 58, 588, 92, 578, 116);
+  c.lineTo(572, 642);
+  c.quadraticCurveTo(570, 700, 516, 728);
+  c.lineTo(334, 810);
+  c.quadraticCurveTo(300, 826, 266, 810);
+  c.lineTo(84, 728);
+  c.quadraticCurveTo(30, 700, 28, 642);
+  c.lineTo(22, 116);
+  c.bezierCurveTo(12, 92, 10, 58, 30, 30);
+  c.bezierCurveTo(38, 48, 52, 62, 78, 62);
+  c.closePath();
+  c.restore();
+}
+
+const SHIELDS = [
+  { id: 'gold', name: 'Gold', rim: ['#fff4c2', '#d4a63a', '#8a6414'], fill: ['#f7df8c', '#d9b04a', '#b88a22'], text: '#2e2307', light: true },
+  { id: 'gold-rare', name: 'Gold Rare', rim: ['#fffbe6', '#e8bb48', '#8a6414'], fill: ['#fff0b0', '#e6bd52', '#a87a18'], text: '#2e2307', light: true, sheen: 0.45 },
+  { id: 'silver', name: 'Silver', rim: ['#ffffff', '#b8bec4', '#6b7178'], fill: ['#eef1f4', '#c4cad0', '#9aa1a8'], text: '#1e2328', light: true },
+  { id: 'bronze', name: 'Bronze', rim: ['#ffd9b5', '#b9784a', '#6b3d1e'], fill: ['#e6a878', '#bb7d4f', '#8a5430'], text: '#2b160a', light: true },
+  { id: 'black-gold', name: 'Black & Gold', rim: ['#fff0b0', '#d9b25a', '#7a5a1a'], fill: ['#2b2a28', '#121212', '#050505'], text: '#f2d98f' },
+  { id: 'red-gold', name: 'Red & Gold', rim: ['#fff0b0', '#d8b060', '#7a5a1a'], fill: ['#b3192a', '#7a0d18', '#3e0409'], text: '#ffe9b0' },
+  { id: 'white-gold', name: 'White & Gold', rim: ['#fff4c2', '#c9a24a', '#7a5a1a'], fill: ['#ffffff', '#f0f0f0', '#d6d6d6'], text: '#3a2c0c', light: true },
+  { id: 'purple', name: 'Purple', rim: ['#f1dcff', '#b57ae6', '#4a1f78'], fill: ['#6b2aa8', '#3d1270', '#1a0638'], text: '#ffffff' },
+  { id: 'blue', name: 'Blue', rim: ['#e3f3ff', '#6fb4f0', '#1d4f8a'], fill: ['#2266c4', '#123f86', '#071d44'], text: '#ffffff' },
+  { id: 'teal', name: 'Teal', rim: ['#e0fff9', '#5fe0cc', '#0d5c52'], fill: ['#17a090', '#0b6a5f', '#04302b'], text: '#e8fffb' },
+  { id: 'green', name: 'Green & Gold', rim: ['#fff0b0', '#e3c25f', '#6b5414'], fill: ['#159458', '#0b5c36', '#032b19'], text: '#fbe9a8' },
+  { id: 'pink', name: 'Pink', rim: ['#fff0f7', '#ff8cc6', '#8a1f55'], fill: ['#e0458f', '#9c1d5c', '#4a0a2a'], text: '#ffffff' },
+  { id: 'orange', name: 'Orange', rim: ['#fff1d6', '#ffae4a', '#8a4a0a'], fill: ['#f07a1a', '#b84c06', '#5a2002'], text: '#fff4e0' },
+  { id: 'aqua-gold', name: 'Navy & Gold', rim: ['#fff0b0', '#e0b84e', '#6b5414'], fill: ['#1c2c5a', '#101a3a', '#060b1c'], text: '#f6dc8e' },
+];
+
+function makeShield(s) {
+  const c = document.createElement('canvas');
+  const S = 2; // render at 2x for crisp exports
+  c.width = 600 * S; c.height = 840 * S;
+  const x = c.getContext('2d');
+  x.scale(S, S);
+  const lin = (stops, x0, y0, x1, y1) => {
+    const g = x.createLinearGradient(x0, y0, x1, y1);
+    stops.forEach((col, i) => g.addColorStop(i / (stops.length - 1), col));
+    return g;
+  };
+  // outer rim
+  shieldPath(x, 1);
+  x.fillStyle = lin(s.rim, 0, 0, 600, 840); x.fill();
+  // inner face
+  shieldPath(x, 0.94);
+  x.fillStyle = lin(s.fill, 120, 0, 480, 840); x.fill();
+  // soft light from the top, darker toward the base
+  x.save();
+  shieldPath(x, 0.94); x.clip();
+  const top = x.createRadialGradient(300, 120, 20, 300, 160, 520);
+  top.addColorStop(0, `rgba(255,255,255,${s.light ? 0.35 : 0.16})`); top.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = top; x.fillRect(0, 0, 600, 840);
+  const base = x.createLinearGradient(0, 520, 0, 840);
+  base.addColorStop(0, 'rgba(0,0,0,0)'); base.addColorStop(1, `rgba(0,0,0,${s.light ? 0.12 : 0.3})`);
+  x.fillStyle = base; x.fillRect(0, 0, 600, 840);
+  if (s.sheen) {
+    const sh = x.createLinearGradient(140, 0, 460, 0);
+    sh.addColorStop(0, 'rgba(255,255,255,0)'); sh.addColorStop(0.5, `rgba(255,255,255,${s.sheen})`); sh.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = sh;
+    x.beginPath(); x.moveTo(170, 840); x.lineTo(380, 0); x.lineTo(470, 0); x.lineTo(260, 840); x.fill();
+  }
+  x.restore();
+  // fine inner line + divider lines
+  shieldPath(x, 0.905);
+  x.strokeStyle = s.rim[0]; x.globalAlpha = 0.55; x.lineWidth = 2; x.stroke(); x.globalAlpha = 1;
+  // edge highlight on the rim
+  shieldPath(x, 1);
+  x.strokeStyle = 'rgba(0,0,0,0.35)'; x.lineWidth = 1.5; x.stroke();
+  return c;
+}
+
+function builtInFrames() {
+  return SHIELDS.map(s => ({
+    id: 'shield-' + s.id, name: s.name, group: 'Cards', builtIn: true,
+    img: makeShield(s), text: s.text, shadow: !s.light,
+    layout: { photo: { x: 0.31, y: 0.1, w: 0.6, h: 0.5 }, col: 0.25, top: 0.14, name: 0.665, statLabel: 0.735, statValue: 0.795, team: 0.875, statLeft: 0.12, statRight: 0.88 },
+  }));
+}
+
+window.FCCards = { STAT_KEYS, STAT_LABELS, GK_LABELS, renderCard, CARD_W, DEFAULT_LAYOUT, builtInFrames };

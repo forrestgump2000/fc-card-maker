@@ -31,7 +31,7 @@
     frameId: null, name: '', rating: 88, showRating: true, position: 'ST', country: '', team: '',
     stats: Object.fromEntries(STAT_KEYS.map(k => [k, 80])),
     show: Object.fromEntries(STAT_KEYS.map(k => [k, true])),
-    photoZoom: 1, photoX: 0, photoY: 0,
+    photoZoom: 1, photoX: 0, photoY: 0, autoRating: true,
   };
   let state = structuredClone(defaults);
   try {
@@ -218,7 +218,34 @@
 
   // ---------- rendering ----------
   let raf = 0;
+  // Overall rating built from the six stats, weighted by position (like real player ratings).
+  const WEIGHTS = {
+    ST: [.20, .35, .10, .20, 0, .15], CF: [.15, .30, .15, .30, 0, .10],
+    LW: [.25, .20, .20, .30, 0, .05], RW: [.25, .20, .20, .30, 0, .05],
+    LM: [.25, .15, .25, .25, .05, .05], RM: [.25, .15, .25, .25, .05, .05],
+    CAM: [.10, .20, .30, .30, 0, .10], CM: [.05, .10, .35, .25, .15, .10],
+    CDM: [.05, 0, .25, .10, .35, .25], CB: [.10, 0, .05, .05, .50, .30],
+    LB: [.25, 0, .20, .10, .30, .15], RB: [.25, 0, .20, .10, .30, .15],
+    LWB: [.25, 0, .20, .15, .25, .15], RWB: [.25, 0, .20, .15, .25, .15],
+    GK: [.22, .22, .08, .25, .03, .20],
+  };
+  function calcOverall() {
+    const w = WEIGHTS[state.position] || [1, 1, 1, 1, 1, 1];
+    let sum = 0, tot = 0;
+    STAT_KEYS.forEach((k, i) => { if (state.show[k]) { sum += state.stats[k] * w[i]; tot += w[i]; } });
+    if (!tot) { // only zero-weight stats showing: plain average of what's shown
+      const vis = STAT_KEYS.filter(k => state.show[k]);
+      if (!vis.length) return state.rating;
+      return clamp(vis.reduce((a, k) => a + state.stats[k], 0) / vis.length);
+    }
+    return clamp(sum / tot);
+  }
+
   function draw() {
+    if (state.autoRating) {
+      state.rating = calcOverall();
+      $('rating').value = state.rating; $('rating-num').value = state.rating;
+    }
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(() => {
       const f = currentFrame();
@@ -238,7 +265,7 @@
       ...defaults, name: 'Your Name', rating: 88, position: 'ST', flag: '', team: '',
       stats: { pac: 91, sho: 88, pas: 82, dri: 90, def: 45, phy: 78 },
     };
-    const groups = ['My Cards', ...new Set(frames.filter(f => !f.custom).map(f => f.group || 'Cards'))];
+    const groups = [...new Set(frames.filter(f => !f.custom).map(f => f.group || 'Cards')), 'My Cards'];
     for (const g of groups) {
       const h = document.createElement('h2'); h.className = 'group-title'; h.textContent = g;
       const grid = document.createElement('div'); grid.className = 'design-grid';
@@ -331,6 +358,8 @@
     $('name').value = state.name;
     $('rating').value = state.rating; $('rating-num').value = state.rating;
     $('show-rating').checked = state.showRating;
+    $('auto-rating').checked = state.autoRating;
+    $('rating').disabled = $('rating-num').disabled = state.autoRating;
     $('rating').closest('.stat-row').classList.toggle('off', !state.showRating);
     $('position').value = state.position;
     $('country').value = state.country;
@@ -389,6 +418,7 @@
     $('rating').oninput = (e) => { state.rating = clamp(e.target.value); $('rating-num').value = state.rating; draw(); };
     $('rating-num').onchange = (e) => { state.rating = clamp(e.target.value); syncControls(); draw(); };
     $('show-rating').onchange = (e) => { state.showRating = e.target.checked; syncControls(); draw(); };
+    $('auto-rating').onchange = (e) => { state.autoRating = e.target.checked; syncControls(); draw(); };
     $('position').onchange = (e) => { state.position = e.target.value; syncControls(); draw(); };
     $('country').onchange = (e) => { state.country = e.target.value; draw(); };
     $('team').oninput = (e) => { state.team = e.target.value; draw(); };
@@ -492,7 +522,7 @@
     const loaded = await Promise.all(list.map(async (f) => {
       try { return { ...f, img: await loadImg('/frames/' + f.file) }; } catch (e) { return null; }
     }));
-    frames = loaded.filter(Boolean);
+    frames = [...window.FCCards.builtInFrames(), ...loaded.filter(Boolean)];
     try {
       const saved = (await DB.all()) || [];
       saved.sort((a, b) => a.created - b.created);
