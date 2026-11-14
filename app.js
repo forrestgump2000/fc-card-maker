@@ -80,8 +80,7 @@
   };
 
   // ---------- automatic background removal for player photos ----------
-  // 1st choice: remove.bg through our own /api/remove-bg (key stays on the server).
-  // Backup: MODNet portrait matting running in the browser (no account needed).
+  // MODNet portrait matting, running in the browser (free, no account needed).
   const TJS = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/dist/transformers.min.js';
   let modnetPromise = null;
   function getModnet() {
@@ -107,18 +106,6 @@
     return c;
   }
 
-  async function viaRemoveBg(img) {
-    const c = photoCanvas(img, 1600);
-    const jpg = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
-    const r = await fetch('/api/remove-bg', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: jpg });
-    if (!r.ok) throw new Error('remove.bg unavailable (' + r.status + ')');
-    const cut = await loadImg(URL.createObjectURL(await r.blob()));
-    const out = document.createElement('canvas');
-    out.width = cut.naturalWidth; out.height = cut.naturalHeight;
-    out.getContext('2d', { willReadFrequently: true }).drawImage(cut, 0, 0);
-    return out;
-  }
-
   async function viaModnet(img) {
     const { t, model, processor } = await getModnet();
     const c = photoCanvas(img, 1024);
@@ -136,7 +123,7 @@
   // Returns a new image of just the person, cropped tight, with a transparent background.
   async function removeBackground(img) {
     let c;
-    try { c = await viaRemoveBg(img); } catch (e) { c = await viaModnet(img); }
+    c = await viaModnet(img);
     const x = c.getContext('2d', { willReadFrequently: true });
 
     // crop to the person
