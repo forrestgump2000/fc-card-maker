@@ -39,30 +39,38 @@
     if (saved) state = { ...state, ...saved, stats: { ...state.stats, ...saved.stats }, show: { ...state.show, ...saved.show } };
   } catch (e) { /* storage unavailable */ }
   const images = { photo: null, badge: null };
+  const photos = { original: null, cutout: null };
   let frames = [];
   const { DEFAULT_LAYOUT } = window.FCCards;
 
   // ---------- on-device storage for imported cards (IndexedDB) ----------
-  const DB = {
+  // 'cards' = imported card designs, 'players' = finished player cards saved with the top Save button
+  const makeStore = (name) => ({
     open() {
       return new Promise((res, rej) => {
-        const r = indexedDB.open('fc-card-maker', 1);
-        r.onupgradeneeded = () => r.result.createObjectStore('cards', { keyPath: 'id' });
+        const r = indexedDB.open('fc-card-maker', 2);
+        r.onupgradeneeded = () => {
+          for (const s of ['cards', 'players']) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' });
+        };
         r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
       });
     },
     async tx(mode, fn) {
       const db = await this.open();
       return new Promise((res, rej) => {
-        const t = db.transaction('cards', mode);
-        const out = fn(t.objectStore('cards'));
+        const t = db.transaction(name, mode);
+        const out = fn(t.objectStore(name));
         t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error);
       });
     },
     all() { return this.tx('readonly', s => s.getAll()); },
     put(rec) { return this.tx('readwrite', s => s.put(rec)); },
     del(id) { return this.tx('readwrite', s => s.delete(id)); },
-  };
+  });
+  const DB = makeStore('cards');
+  const PlayersDB = makeStore('players');
+  let players = []; // { id, frameId, data, photo, badge, photoCutout, created, photoImg, badgeImg }
+  let savedId = null; // which saved player card is open in the editor (null = new)
   const toRecord = (f) => ({ id: f.id, name: f.name, blob: f.blob, layout: f.layout, text: f.text, created: f.created });
   let saveTimer = 0;
   const saveFrame = (f) => {
@@ -275,6 +283,25 @@
         add.innerHTML = '<span class="plus">+</span><span class="design-name">Add card</span>';
         add.onclick = () => $('card-import').click();
         grid.append(add);
+        for (const p of players) {
+          const f = frames.find(x => x.id === p.frameId) || frames[0];
+          if (!f) continue;
+          const btn = document.createElement('button');
+          btn.className = 'design-tile'; btn.type = 'button';
+          const c = document.createElement('canvas');
+          renderCard(c, f, playerData(p.data), { photo: p.photoImg, badge: p.badgeImg }, 0.6);
+          const label = document.createElement('span'); label.className = 'design-name';
+          label.textContent = p.data.name || 'No name';
+          btn.append(c, label);
+          btn.addEventListener('click', () => openPlayer(p));
+          const wrap = document.createElement('div'); wrap.className = 'tile-wrap';
+          const del = document.createElement('button');
+          del.type = 'button'; del.className = 'tile-delete'; del.textContent = '×';
+          del.setAttribute('aria-label', `Delete ${label.textContent}`);
+          del.addEventListener('click', (e) => { e.stopPropagation(); deletePlayer(p); });
+          wrap.append(btn, del);
+          grid.append(wrap);
+        }
       }
       for (const f of frames.filter(x => !hiddenCards.includes(x.id) && (x.custom ? 'My Cards' : (x.group || 'Cards')) === g)) {
         const btn = document.createElement('button');
@@ -293,9 +320,9 @@
         grid.append(wrap);
       }
       root.append(h, grid);
-      if (g === 'My Cards' && !frames.some(f => f.custom)) {
+      if (g === 'My Cards' && !frames.some(f => f.custom) && !players.length) {
         const p = document.createElement('p'); p.className = 'hint';
-        p.textContent = 'Tap "Add card" and pick card images from your photos. They stay saved on this device.';
+        p.textContent = 'Cards you save with the Save button show up here. Tap "Add card" to use card images from your photos.';
         root.append(p);
       }
     }
@@ -345,10 +372,64 @@
   }
   function openEditor(id) {
     state.frameId = id;
+    savedId = null;
     $('design-name').textContent = currentFrame().name;
     syncLayout();
     show('editor');
     draw();
+  }
+
+  const flagFor = (country) => (COUNTRIES.find(c => c.name === country) || {}).flag || '';
+  const playerData = (d) => ({ ...d, flag: flagFor(d.country) });
+  const imgBlob = async (img) => img ? (await fetch(img.src)).blob() : null;
+
+  function toast(msg) {
+    const t = $('toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, 2200);
+  }
+
+  // Top-right Save: keep the finished card in My Cards (saving again updates it).
+  async function savePlayer() {
+    const f = currentFrame(); if (!f) return;
+    const id = savedId || 'p' + Date.now().toString(36);
+    const existing = players.find(p => p.id === id);
+    const data = structuredClone(state); delete data.frameId;
+    const rec = {
+      id, frameId: f.id, data,
+      photo: await imgBlob(images.photo), photoCutout: !!(images.photo && images.photo.cutout),
+      badge: await imgBlob(images.badge),
+      created: existing ? existing.created : Date.now(),
+    };
+    try { await PlayersDB.put(rec); } catch (e) { /* storage unavailable: kept for this visit */ }
+    const live = { ...rec, photoImg: images.photo, badgeImg: images.badge };
+    if (existing) players[players.indexOf(existing)] = live; else players.unshift(live);
+    savedId = id;
+    buildMenu();
+    toast(existing ? 'Updated in My Cards' : 'Saved to My Cards');
+  }
+
+  function openPlayer(p) {
+    state = { ...structuredClone(defaults), ...structuredClone(p.data), frameId: p.frameId };
+    if (!frames.some(f => f.id === state.frameId)) state.frameId = frames[0] && frames[0].id;
+    savedId = p.id;
+    images.photo = p.photoImg || null; images.badge = p.badgeImg || null;
+    photos.original = images.photo; photos.cutout = null;
+    $('photo-remove').hidden = !images.photo; $('photo-adjust').hidden = !images.photo;
+    $('photo-cutout-row').hidden = true; $('photo-status').hidden = true;
+    $('badge-remove').hidden = !images.badge;
+    syncControls();
+    $('design-name').textContent = currentFrame().name;
+    syncLayout();
+    show('editor');
+    draw();
+  }
+
+  async function deletePlayer(p) {
+    if (!confirm(`Delete "${p.data.name || 'this card'}"?`)) return;
+    players = players.filter(x => x !== p);
+    try { await PlayersDB.del(p.id); } catch (e) {}
+    if (savedId === p.id) savedId = null;
+    buildMenu();
   }
 
   function syncLayout() {
@@ -481,7 +562,6 @@
       $(removeId).onclick = () => { images[key] = null; $(removeId).hidden = true; onSet && onSet(false); draw(); };
     };
     // player photo: background removed automatically
-    const photos = { original: null, cutout: null };
     const usePhoto = () => {
       images.photo = $('photo-cutout').checked && photos.cutout ? photos.cutout : photos.original;
       draw();
@@ -530,7 +610,7 @@
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     };
-    $('save').onclick = save; $('save-top').onclick = save;
+    $('save').onclick = save; $('save-top').onclick = savePlayer;
   }
 
   // ---------- boot ----------
@@ -553,6 +633,18 @@
         try { frames.push({ ...r, group: 'My Cards', custom: true, layout: r.layout || {}, img: await loadImg(URL.createObjectURL(r.blob)) }); } catch (e) {}
       }
     } catch (e) { /* storage unavailable: imported cards last for this visit only */ }
+    try {
+      const saved = (await PlayersDB.all()) || [];
+      saved.sort((a, b) => b.created - a.created);
+      for (const r of saved) {
+        const p = { ...r };
+        try {
+          if (r.photo) { p.photoImg = await loadImg(URL.createObjectURL(r.photo)); p.photoImg.cutout = r.photoCutout; }
+          if (r.badge) p.badgeImg = await loadImg(URL.createObjectURL(r.badge));
+        } catch (e) {}
+        players.push(p);
+      }
+    } catch (e) { /* storage unavailable */ }
     buildMenu();
   }
   boot();

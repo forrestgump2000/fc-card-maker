@@ -113,3 +113,8 @@ input:disabled { opacity: .5; }
   font: 600 20px/1 -apple-system, sans-serif; background: rgba(13,10,26,.85); color: #fff; border: 1px solid var(--line);
 }
 .tile-delete:hover { background: #b3261e; border-color: #b3261e; }
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 20;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2)); color: #241a00; font-weight: 700;
+  padding: 12px 20px; border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
