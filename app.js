@@ -276,7 +276,7 @@
         add.onclick = () => $('card-import').click();
         grid.append(add);
       }
-      for (const f of frames.filter(x => (x.custom ? 'My Cards' : (x.group || 'Cards')) === g)) {
+      for (const f of frames.filter(x => !hiddenCards.includes(x.id) && (x.custom ? 'My Cards' : (x.group || 'Cards')) === g)) {
         const btn = document.createElement('button');
         btn.className = 'design-tile'; btn.type = 'button';
         const c = document.createElement('canvas');
@@ -284,7 +284,13 @@
         const label = document.createElement('span'); label.className = 'design-name'; label.textContent = f.name;
         btn.append(c, label);
         btn.addEventListener('click', () => openEditor(f.id));
-        grid.append(btn);
+        const wrap = document.createElement('div'); wrap.className = 'tile-wrap';
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'tile-delete'; del.textContent = '×';
+        del.setAttribute('aria-label', `Delete ${f.name}`);
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteCard(f); });
+        wrap.append(btn, del);
+        grid.append(wrap);
       }
       root.append(h, grid);
       if (g === 'My Cards' && !frames.some(f => f.custom)) {
@@ -292,6 +298,13 @@
         p.textContent = 'Tap "Add card" and pick card images from your photos. They stay saved on this device.';
         root.append(p);
       }
+    }
+    if (hiddenCards.length) {
+      const restore = document.createElement('button');
+      restore.type = 'button'; restore.className = 'ghost wide';
+      restore.textContent = `Bring back deleted built-in cards (${hiddenCards.length})`;
+      restore.onclick = () => { hiddenCards = []; saveHidden(hiddenCards); buildMenu(); };
+      root.append(restore);
     }
     const credits = frames.filter(f => f.credit);
     if (credits.length) {
@@ -308,6 +321,22 @@
       box.append(ul);
       root.append(box);
     }
+  }
+
+  // Deleting: imported cards are removed from this device; built-in cards are hidden (and can be brought back).
+  const loadHidden = () => { try { return JSON.parse(localStorage.getItem('fc-hidden') || '[]'); } catch (e) { return []; } };
+  const saveHidden = (list) => { try { localStorage.setItem('fc-hidden', JSON.stringify(list)); } catch (e) {} };
+  let hiddenCards = [];
+  async function deleteCard(f) {
+    if (!confirm(`Delete "${f.name}"?`)) return;
+    if (f.custom) {
+      frames = frames.filter(x => x !== f);
+      try { await DB.del(f.id); } catch (e) {}
+    } else {
+      hiddenCards = [...new Set([...hiddenCards, f.id])]; saveHidden(hiddenCards);
+    }
+    if (state.frameId === f.id) state.frameId = null;
+    buildMenu(); show('menu');
   }
 
   function show(id) {
@@ -406,14 +435,7 @@
     $('lay-photo-y').oninput = () => editLayout(setPhoto);
     $('lay-photo-size').oninput = () => editLayout(setPhoto);
     $('lay-reset').onclick = () => editLayout(f => { f.layout = {}; syncLayout(); });
-    $('card-delete').onclick = async () => {
-      const f = currentFrame(); if (!f || !f.custom) return;
-      if (!confirm(`Delete "${f.name}" from this device?`)) return;
-      frames = frames.filter(x => x !== f);
-      try { await DB.del(f.id); } catch (e) {}
-      state.frameId = null;
-      buildMenu(); show('menu');
-    };
+    $('card-delete').onclick = () => { const f = currentFrame(); if (f) deleteCard(f); };
     $('name').oninput = (e) => { state.name = e.target.value; draw(); };
     $('rating').oninput = (e) => { state.rating = clamp(e.target.value); $('rating-num').value = state.rating; draw(); };
     $('rating-num').onchange = (e) => { state.rating = clamp(e.target.value); syncControls(); draw(); };
@@ -522,6 +544,7 @@
     const loaded = await Promise.all(list.map(async (f) => {
       try { return { ...f, img: await loadImg('/frames/' + f.file) }; } catch (e) { return null; }
     }));
+    hiddenCards = loadHidden();
     frames = [...window.FCCards.builtInFrames(), ...loaded.filter(Boolean)];
     try {
       const saved = (await DB.all()) || [];
