@@ -550,17 +550,6 @@
       syncControls(); draw();
     };
 
-    const imagePicker = (inputId, removeId, key, onSet) => {
-      $(inputId).onchange = async (e) => {
-        const file = e.target.files[0]; if (!file) return;
-        try {
-          images[key] = await loadImg(await readFile(file));
-          $(removeId).hidden = false; onSet && onSet(true); draw();
-        } catch (err) { alert('Sorry, that image could not be opened.'); }
-        e.target.value = '';
-      };
-      $(removeId).onclick = () => { images[key] = null; $(removeId).hidden = true; onSet && onSet(false); draw(); };
-    };
     // player photo: background removed automatically
     const usePhoto = () => {
       images.photo = $('photo-cutout').checked && photos.cutout ? photos.cutout : photos.original;
@@ -593,7 +582,23 @@
       $('photo-remove').hidden = true; $('photo-adjust').hidden = true; $('photo-cutout-row').hidden = true; $('photo-status').hidden = true;
       draw();
     };
-    imagePicker('badge-input', 'badge-remove', 'badge');
+    // team badge: clear the plain background around the logo and trim it tight
+    $('badge-input').onchange = async (e) => {
+      const file = e.target.files[0]; e.target.value = '';
+      if (!file) return;
+      try {
+        const src = await loadImg(await readFile(file));
+        const max = 600, s = Math.min(1, max / Math.max(src.naturalWidth, src.naturalHeight));
+        let c = document.createElement('canvas');
+        c.width = Math.round(src.naturalWidth * s); c.height = Math.round(src.naturalHeight * s);
+        c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+        c = cutOutCard(c);
+        const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+        images.badge = await loadImg(URL.createObjectURL(blob));
+        $('badge-remove').hidden = false; draw();
+      } catch (err) { alert('Sorry, that image could not be opened.'); }
+    };
+    $('badge-remove').onclick = () => { images.badge = null; $('badge-remove').hidden = true; draw(); };
 
     const save = async () => {
       const f = currentFrame(); if (!f) return;
